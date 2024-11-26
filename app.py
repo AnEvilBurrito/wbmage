@@ -7,6 +7,9 @@ from PIL import Image
 import pandas as pd
 import plotly.graph_objects as go
 
+
+# 中文注释
+
 # Page config
 st.set_page_config(
     page_title="Western Blot Analyzer",
