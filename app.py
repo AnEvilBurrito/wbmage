@@ -69,28 +69,28 @@ def safe_read_image(image_path):
         return None
 
 def standardize_image(image):
-    """标准化图像大小和质量"""
-    # 设定标准尺寸
-    standard_height = 500  # 设置一个较高的标准高度以保持清晰度
+    """Standardize image size and quality"""
+    # Set the standard height
+    standard_height = 500  # Set a higher standard height to maintain clarity
     
-    # 计算宽度，保持原始宽高比
+    # Calculate width while maintaining the original aspect ratio
     aspect_ratio = image.shape[1] / image.shape[0]
     standard_width = int(standard_height * aspect_ratio)
     
-    # 调整图像大小
+    # Resize the image
     resized = cv2.resize(image, (standard_width, standard_height), 
-                        interpolation=cv2.INTER_LANCZOS4)  # 使用Lanczos插值获得更好的质量
+                        interpolation=cv2.INTER_LANCZOS4)  # Use Lanczos interpolation for better quality
     
-    # 图像锐化
+    # Sharpen the image
     kernel = np.array([[-1,-1,-1],
                       [-1, 9,-1],
                       [-1,-1,-1]])
     sharpened = cv2.filter2D(resized, -1, kernel)
     
-    # 降噪同时保持边缘
+    # Denoise while preserving edges
     denoised = cv2.fastNlMeansDenoisingColored(sharpened, None, 10, 10, 7, 21)
     
-    # 调整对比度和亮度
+    # Adjust contrast and brightness
     lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
@@ -101,50 +101,50 @@ def standardize_image(image):
     return enhanced
 
 def process_image(image):
-    """处理图像的主函数"""
-    # 首先进行标准化
+    """Main function for processing the image"""
+    # First, standardize the image
     standardized = standardize_image(image)
     
-    # 转换为灰度图
+    # Convert to grayscale
     gray = cv2.cvtColor(standardized, cv2.COLOR_BGR2GRAY)
     
-    # 进一步的图像增强
+    # Further image enhancement
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
     enhanced = clahe.apply(gray)
     
-    # 去噪
+    # Denoise the image
     denoised = cv2.fastNlMeansDenoising(enhanced, None, 10, 7, 21)
     
-    # 反转图像（使条带为白色
+    # Invert the image (to make bands white)
     inverted = cv2.bitwise_not(denoised)
     
     return inverted, standardized
 
 def detect_bands(image):
-    """改进的条带检测函数"""
-    # 预处理以减少阴影影响
+    """Improved band detection function"""
+    # Preprocess to reduce shadow effects
     blur = cv2.GaussianBlur(image, (5,5), 0)
     
-    # 使用Otsu阈值分割，更好地分离条带和背景
+    # Use Otsu thresholding to better separate bands and background
     _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
-    # 形态学操作去除噪声和阴影
-    kernel_v = np.ones((15,1), np.uint8)  # 垂直方向的核
-    kernel_h = np.ones((1,5), np.uint8)   # 水平方向的核
+    # Morphological operations to remove noise and shadows
+    kernel_v = np.ones((15,1), np.uint8)  # Vertical kernel
+    kernel_h = np.ones((1,5), np.uint8)   # Horizontal kernel
     
-    # 开运算去除小噪点
+    # Open operation to remove small noise
     opened = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_h)
-    # 闭运算填充条带内的空隙
+    # Close operation to fill gaps inside bands
     closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel_v)
     
-    # 寻找轮廓
+    # Find contours
     contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    # 合并过近的轮廓
+    # Merge contours that are too close
     merged_contours = []
-    min_distance = 2  # 最小距离阈值
+    min_distance = 2  # Minimum distance threshold
     
-    # 按x坐标排序轮廓
+    # Sort contours by x-coordinate
     sorted_contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[0])
     
     current_contour = None
@@ -152,68 +152,68 @@ def detect_bands(image):
         x, y, w, h = cv2.boundingRect(contour)
         area = cv2.contourArea(contour)
         
-        # 过滤掉太小的轮廓（可能是噪声）
-        if area < 50:  # 最小面积阈值
+        # Filter out contours that are too small (likely noise)
+        if area < 50:  # Minimum area threshold
             continue
             
-        # 过滤掉高宽比异常的轮廓（可能是阴影）
+        # Filter out contours with abnormal aspect ratios (likely shadows)
         aspect_ratio = w / h
-        if aspect_ratio > 5 or aspect_ratio < 0.2:  # 限制长宽比
+        if aspect_ratio > 5 or aspect_ratio < 0.2:  # Limit aspect ratio
             continue
         
         if current_contour is None:
             current_contour = contour
         else:
-            # 获取当前轮廓的边界框
+            # Get the bounding box of the current contour
             curr_x, _, curr_w, _ = cv2.boundingRect(current_contour)
             
-            # 如果两个轮廓足够近，合并它们
+            # If two contours are close enough, merge them
             if x - (curr_x + curr_w) < min_distance:
-                # 创建合并的轮廓
+                # Create a merged contour
                 combined_contour = np.vstack((current_contour, contour))
                 current_contour = combined_contour
             else:
                 merged_contours.append(current_contour)
                 current_contour = contour
     
-    # 添加最后一个轮廓
+    # Add the last contour
     if current_contour is not None:
         merged_contours.append(current_contour)
     
-    # 对每个合并后的轮廓进行优化
+    # Optimize each merged contour
     final_contours = []
     for cnt in merged_contours:
-        # 获取轮廓的边界框
+        # Get the bounding box of the contour
         x, y, w, h = cv2.boundingRect(cnt)
         
-        # 稍微扩大ROI区域
+        # Slightly expand the ROI area
         roi = image[max(0, y-5):min(image.shape[0], y+h+5),
                    max(0, x-5):min(image.shape[1], x+w+5)]
         
-        # 对ROI重新进行阈值分割
+        # Reapply thresholding within the ROI
         _, roi_thresh = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         
-        # 在ROI中找到最大轮廓
+        # Find the largest contour within the ROI
         roi_contours, _ = cv2.findContours(roi_thresh, cv2.RETR_EXTERNAL, 
                                          cv2.CHAIN_APPROX_SIMPLE)
         
         if roi_contours:
-            # 选择最大的轮廓
+            # Choose the largest contour
             max_cnt = max(roi_contours, key=cv2.contourArea)
-            # 调整坐标到原图
+            # Adjust coordinates back to the original image
             max_cnt = max_cnt + np.array([max(0, x-5), max(0, y-5)])[None, None, :]
             final_contours.append(max_cnt)
     
     return final_contours
 
 def analyze_band_intensity(image, contours):
-    """改进的条带强度分析函数"""
+    """Improved band intensity analysis function"""
     results = []
     
     for i, cnt in enumerate(contours):
         x, y, w, h = cv2.boundingRect(cnt)
         
-        # 扩大ROI区域以包含周围背景
+        # Expand ROI to include surrounding background
         roi_y1 = max(0, y - 10)
         roi_y2 = min(image.shape[0], y + h + 10)
         roi_x1 = max(0, x - 10)
@@ -221,25 +221,25 @@ def analyze_band_intensity(image, contours):
         
         roi = image[roi_y1:roi_y2, roi_x1:roi_x2]
         
-        # 创建掩码
+        # Create a mask
         mask = np.zeros_like(roi)
         roi_cnt = cnt - np.array([roi_x1, roi_y1])[None, None, :]
         cv2.drawContours(mask, [roi_cnt], -1, 255, -1)
         
-        # 计算背景（使用ROI边缘区域）
+        # Calculate background (using the edge region of the ROI)
         bg_mask = cv2.bitwise_not(mask)
         background = np.median(roi[bg_mask > 0])
         
-        # 计算条带强度
+        # Calculate band intensity
         band_pixels = roi[mask > 0]
         mean_intensity = np.mean(band_pixels) - background
         
-        # 调整数值比例
-        mean_intensity = (mean_intensity / 100)  # 将强度除以100
-        area = cv2.contourArea(cnt) / 100  # 将面积除以100
+        # Adjust numerical scale
+        mean_intensity = (mean_intensity / 100)  # Divide intensity by 100
+        area = cv2.contourArea(cnt) / 100  # Divide area by 100
         total_intensity = mean_intensity * len(band_pixels)
         
-        # 计算积分密度
+        # Calculate integrated density
         integrated_density = total_intensity * area
         
         results.append({
@@ -276,11 +276,11 @@ def main():
         return
     
     if image is not None:
-        # 添加原始图像信息显示
+        # Add original image information display
         st.sidebar.subheader("Image Information")
         st.sidebar.text(f"Original Size: {image.shape[1]}x{image.shape[0]}")
         
-        # 处理图像
+        # Process the image
         processed, standardized = process_image(image)
         bands = detect_bands(processed)
         
@@ -291,13 +291,13 @@ def main():
             st.image(standardized, channels="BGR", use_container_width=True)
             st.caption(f"Standardized Size: {standardized.shape[1]}x{standardized.shape[0]}")
         
-        # 绘制检测结果
+        # Draw detection results
         result = standardized.copy()
         for i, cnt in enumerate(bands):
-            # 绘制轮廓
+            # Draw contours
             cv2.drawContours(result, [cnt], -1, (0,255,255), 2)
             
-            # 绘制边界框和标签
+            # Draw bounding boxes and labels
             x,y,w,h = cv2.boundingRect(cnt)
             cv2.rectangle(result, (x,y), (x+w,y+h), (0,255,255), 1)
             cv2.putText(result, f"#{i+1}", (x,y-5), 
@@ -307,19 +307,19 @@ def main():
             st.subheader("Detected Bands")
             st.image(result, channels="BGR", use_container_width=True)
         
-        # 分析结果
+        # Analysis results
         if len(bands) > 0:
             st.subheader("Band Analysis Results")
             analysis_results = analyze_band_intensity(processed, bands)
             
-            # 创建DataFrame
+            # Create DataFrame
             df = pd.DataFrame(analysis_results)
             
-            # 添加相对积分密度
+            # Add relative integrated density
             max_density = df['integrated_density'].max()
             df['relative_density'] = (df['integrated_density'] / max_density * 100)
             
-            # 设置显示列并四舍五入到两位小数
+            # Set display columns and round to two decimal places
             display_cols = [
                 'band_number', 
                 'area',
@@ -328,16 +328,16 @@ def main():
                 'relative_density'
             ]
             
-            # 对所有数值列四舍五入到两位小数
+            # Round all numerical columns to two decimal places
             df = df.round(2)
             
             st.dataframe(df[display_cols])
             
-            # 添加积分密度分布图
+            # Add integrated density distribution plot
             st.subheader("Integrated Density Distribution")
             fig = go.Figure()
             
-            # 添加积分密度柱状图
+            # Add integrated density bar chart
             fig.add_trace(go.Bar(
                 x=df['band_number'],
                 y=df['relative_density'],
